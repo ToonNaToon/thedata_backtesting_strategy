@@ -10,7 +10,10 @@ import numpy as np
 from datetime import datetime, time
 from typing import Dict, List, Tuple, Optional
 import logging
-
+import os
+import gzip
+import shutil
+import requests
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -38,6 +41,7 @@ class IronCondorBacktester:
         self.exit_time = exit_time
         self.profit_target = 0.10  # 10% profit target
         self.conn = None
+        self._ensure_database_exists()  # Add this line to handle database download
 
     def connect(self):
         """Connect to DuckDB database."""
@@ -118,14 +122,61 @@ class IronCondorBacktester:
             data_delta,
             data_underlying_price,
             ticker
-        FROM optionData_Backtesting 
-        WHERE ticker = '{self.ticker}' 
-        AND trade_date = ?
-        AND strftime('%H:%M:%S', data_timestamp) BETWEEN ? AND ?
-        AND data_bid > 0 AND data_ask > 0
-        ORDER BY data_timestamp
+            FROM optionData_Backtesting 
+            WHERE ticker = '{self.ticker}' 
+            AND trade_date = ?
+            AND strftime('%H:%M:%S', data_timestamp) BETWEEN ? AND ?
+            AND data_bid > 0 AND data_ask > 0
+            ORDER BY data_timestamp
         """
         return self.conn.execute(query, [trade_date, start_time, end_time]).df()
+    def _ensure_database_exists(self):
+        """Ensure the database file exists, download and extract if necessary."""
+        if os.path.exists(self.db_path):
+            print("Database found. Proceeding...")
+            return
+
+        print("Database not found. Downloading...")
+        zip_path = f"{self.db_path}.gz"
+        url = "https://drive.google.com/uc?export=download&id=1x4PO9OH0BHQFDAp-1rvuaEA-ZPI58CmV"
+    
+        try:
+            # Download the file
+            print(f"Downloading database from {url}...")
+            with requests.get(url, stream=True) as r:
+                r.raise_for_status()
+                total_size = int(r.headers.get('content-length', 0))
+                downloaded = 0
+                chunk_size = 8192
+                r.raise_for_status()
+
+                with open(zip_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=chunk_size):
+                        downloaded += len(chunk)
+                        f.write(chunk)
+                        # Show download progress
+                        if total_size > 0:
+                            progress = (downloaded / total_size) * 100
+                            print(f"Downloaded: {downloaded/1024/1024:.2f}MB / {total_size/1024/1024:.2f}MB ({progress:.1f}%)", end='\r')
+                    
+            
+            # Extract the file
+            print("Extracting database...")
+            with gzip.open(zip_path, 'rb') as f_in:
+                with open(self.db_path, 'wb') as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+            
+            # Verify the database
+            if os.path.getsize(self.db_path) > 0:
+                print("Database downloaded and extracted successfully.")
+                # Remove the zip file
+                os.remove(zip_path)
+            else:
+                raise Exception("Downloaded database file is empty")
+            
+        except Exception as e:
+            print(f"Error setting up database: {e}")
+            raise
         
     def get_exit_data(self, trade_date: str, strikes: List[float], entry_timestamp: datetime) -> pd.DataFrame:
         """

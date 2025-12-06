@@ -9,3 +9,4 @@ typing-extensions>=4.5.0
 altair>=4.2.2
 protobuf>=4.21.0
 setuptools>=65.0.0
+requests>=2.31.0

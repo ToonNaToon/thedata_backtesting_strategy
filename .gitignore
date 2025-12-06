@@ -28,10 +28,10 @@ env/
 ENV/
 
 # Data files
-# *.duckdb
+*.duckdb
 *.csv
 *.parquet
-
+*.duckdb.gz
 # IDE
 .vscode/
 .idea/
