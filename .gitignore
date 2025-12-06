@@ -32,6 +32,7 @@ ENV/
 *.csv
 *.parquet
 *.duckdb.gz
+
 # IDE
 .vscode/
 .idea/
