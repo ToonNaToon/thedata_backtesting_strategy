@@ -19,7 +19,7 @@ for hour in range(9, 17):  # 9 to 16
 # Add the current directory to the path to import the backtester
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from backtesting_0dte_SPXW import IronCondorBacktester
+from backtesting_0dte_SPXW import IronCondorBacktester, download_database
 
 def display_single_results(results, ticker, wing, entry_time, exclude_days, exit_time):
     """Display results for single entry time backtest."""
@@ -73,7 +73,7 @@ def display_single_results(results, ticker, wing, entry_time, exclude_days, exit
         hover_data=['Trade Count', 'Avg P&L']
     )
     fig.update_layout(height=400)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
     
     # Detailed results table
     st.subheader("📋 Detailed Results")
@@ -86,7 +86,7 @@ def display_single_results(results, ticker, wing, entry_time, exclude_days, exit
     
     st.dataframe(
         display_results[['trade_date', 'day_of_week', 'entry_credit', 'pnl', 'pnl_pct', 'exit_reason']],
-        use_container_width=True,
+        width='stretch',
         hide_index=True
     )
     
@@ -105,7 +105,7 @@ def display_multiple_results(results, ticker, wing, entry_times, exclude_days, e
     st.subheader("📊 Entry Time Comparison")
     
     # Display comparison table
-    st.dataframe(results, use_container_width=True)
+    st.dataframe(results, width='stretch')
     
     # Create bar chart comparing total P&L by entry time
     st.subheader("📈 Total P&L by Entry Time")
@@ -119,7 +119,7 @@ def display_multiple_results(results, ticker, wing, entry_times, exclude_days, e
         labels={'x': 'Entry Time', 'y': 'Total P&L ($)'}
     )
     fig.update_layout(height=400)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
     
     # Win rate comparison
     st.subheader("🎯 Win Rate by Entry Time")
@@ -133,7 +133,7 @@ def display_multiple_results(results, ticker, wing, entry_times, exclude_days, e
         labels={'x': 'Entry Time', 'y': 'Win Rate (%)'}
     )
     fig2.update_layout(height=400)
-    st.plotly_chart(fig2, use_container_width=True)
+    st.plotly_chart(fig2, width='stretch')
     
     # Parameters summary
     st.subheader("⚙️ Parameters Used")
@@ -252,6 +252,18 @@ if run_button:
     status_text = st.empty()
     
     try:
+        # Check and download database if needed
+        status_text.text("Checking database...")
+        progress_bar.progress(5)
+        
+        db_path = "option_data.duckdb"
+        if not os.path.exists(db_path):
+            status_text.text("Downloading database from Google Drive...")
+            if not download_database(db_path):
+                st.error("Failed to download database. Please try again.")
+                st.stop()
+            status_text.text("Database downloaded successfully!")
+        
         # Initialize backtester
         status_text.text("Initializing backtester...")
         progress_bar.progress(10)
