@@ -28,7 +28,7 @@ env/
 ENV/
 
 # Data files
-*.duckdb
+# *.duckdb
 *.csv
 *.parquet
 
