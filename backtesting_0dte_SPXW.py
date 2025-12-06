@@ -11,15 +11,136 @@ from datetime import datetime, time
 from typing import Dict, List, Tuple, Optional
 import logging
 import os
+import requests
 import gzip
 import shutil
-import requests
+from urllib.parse import urlparse
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+def download_database(db_path: str = "option_data.duckdb", force_download: bool = False):
+    """
+    Download and extract the database file from Google Drive if it doesn't exist.
+    
+    Args:
+        db_path: Path where the database file should be located
+        force_download: Force download even if file exists
+    """
+    if os.path.exists(db_path) and not force_download:
+        logger.info(f"Database file already exists: {db_path}")
+        return True
+    
+    # Google Drive URL - need to convert to direct download link
+    drive_url = "https://drive.google.com/file/d/1x4PO9OH0BHQFDAp-1rvuaEA-ZPI58CmV/view?usp=drive_link"
+    file_id = "1x4PO9OH0BHQFDAp-1rvuaEA-ZPI58CmV"
+    download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    gz_path = f"{db_path}.gz"
+    
+    logger.info("Database file not found. Downloading from Google Drive...")
+    logger.info("Note: This is a large file (4.9GB) and may take some time to download.")
+    
+    try:
+        # Download the gzipped file
+        logger.info(f"Downloading to {gz_path}...")
+        
+        # Use requests with streaming for large files
+        session = requests.Session()
+        
+        # First try the direct download
+        response = session.get(download_url, stream=True)
+        response.raise_for_status()
+        
+        # Check if we got the virus warning page by looking at content type and content
+        content_type = response.headers.get('content-type', '')
+        if 'text/html' in content_type or 'Google Drive - Virus scan warning' in response.text:
+            logger.warning("Google Drive virus scan warning detected. Attempting to bypass...")
+            # Parse the confirmation page to get the download link
+            confirm_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+            response = session.get(confirm_url, stream=True)
+            response.raise_for_status()
+            
+            # If still getting HTML, we need to extract the actual download link
+            if 'text/html' in response.headers.get('content-type', ''):
+                import re
+                # Look for the confirmation token in the HTML
+                text_content = response.text
+                confirm_match = re.search(r'confirm=([0-9A-Za-z_-]+)', text_content)
+                if confirm_match:
+                    confirm_token = confirm_match.group(1)
+                    final_url = f"https://drive.google.com/uc?export=download&confirm={confirm_token}&id={file_id}"
+                    logger.info("Using confirmation token to bypass virus warning...")
+                    response = session.get(final_url, stream=True)
+                    response.raise_for_status()
+                else:
+                    # Try alternative approach - look for download link in the page
+                    download_link_match = re.search(r'href=["\'](/uc\?export=download[^"\']+)["\']', text_content)
+                    if download_link_match:
+                        download_path = download_link_match.group(1)
+                        final_url = f"https://drive.google.com{download_path}"
+                        logger.info("Found alternative download link...")
+                        response = session.get(final_url, stream=True)
+                        response.raise_for_status()
+        
+        # Final check - make sure we're not getting HTML
+        if 'text/html' in response.headers.get('content-type', ''):
+            logger.error("Still receiving HTML content. Download may have failed.")
+            with open('debug_response.html', 'w') as f:
+                f.write(response.text)
+            logger.error("Response content saved to debug_response.html for inspection")
+            return False
+        
+        # Save the gzipped file
+        total_size = int(response.headers.get('content-length', 0))
+        downloaded = 0
+        
+        with open(gz_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size > 0:
+                        percent = (downloaded / total_size) * 100
+                        logger.info(f"Downloaded {downloaded/1024/1024:.1f}MB / {total_size/1024/1024:.1f}MB ({percent:.1f}%)")
+        
+        logger.info(f"Download completed: {gz_path}")
+        
+        # Extract the gzipped file
+        logger.info(f"Extracting {gz_path} to {db_path}...")
+        
+        with gzip.open(gz_path, 'rb') as f_in:
+            with open(db_path, 'wb') as f_out:
+                shutil.copyfileobj(f_in, f_out)
+        
+        # Remove the gzipped file
+        os.remove(gz_path)
+        
+        logger.info(f"Database successfully extracted to: {db_path}")
+        
+        # Verify the file exists and has reasonable size
+        if os.path.exists(db_path):
+            file_size = os.path.getsize(db_path)
+            logger.info(f"Database file size: {file_size/1024/1024:.1f}MB")
+            return True
+        else:
+            logger.error("Database file extraction failed")
+            return False
+            
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Download failed: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Extraction failed: {e}")
+        # Clean up partial files
+        if os.path.exists(gz_path):
+            os.remove(gz_path)
+        if os.path.exists(db_path):
+            os.remove(db_path)
+        return False
 
 class IronCondorBacktester:
     def __init__(self, db_path: str = "option_data.duckdb", ticker: str = "SPXW", wing: int = 20, 
@@ -41,11 +162,16 @@ class IronCondorBacktester:
         self.exit_time = exit_time
         self.profit_target = 0.10  # 10% profit target
         self.conn = None
-        self._ensure_database_exists()  # Add this line to handle database download
 
     def connect(self):
         """Connect to DuckDB database."""
         try:
+            # Ensure database file exists
+            if not os.path.exists(self.db_path):
+                logger.info(f"Database file {self.db_path} not found. Attempting to download...")
+                if not download_database(self.db_path):
+                    raise FileNotFoundError(f"Failed to download database file: {self.db_path}")
+            
             self.conn = duckdb.connect(self.db_path)
             logger.info(f"Connected to database: {self.db_path}")
         except Exception as e:
@@ -122,98 +248,14 @@ class IronCondorBacktester:
             data_delta,
             data_underlying_price,
             ticker
-            FROM optionData_Backtesting 
-            WHERE ticker = '{self.ticker}' 
-            AND trade_date = ?
-            AND strftime('%H:%M:%S', data_timestamp) BETWEEN ? AND ?
-            AND data_bid > 0 AND data_ask > 0
-            ORDER BY data_timestamp
+        FROM optionData_Backtesting 
+        WHERE ticker = '{self.ticker}' 
+        AND trade_date = ?
+        AND strftime('%H:%M:%S', data_timestamp) BETWEEN ? AND ?
+        AND data_bid > 0 AND data_ask > 0
+        ORDER BY data_timestamp
         """
         return self.conn.execute(query, [trade_date, start_time, end_time]).df()
-    def _ensure_database_exists(self):
-    """Ensure the database file exists, download and extract if necessary."""
-    if os.path.exists(self.db_path):
-        print("Database found. Proceeding...")
-        return
-
-    print("Database not found. Downloading...")
-    zip_path = f"{self.db_path}.gz"
-    base_url = "https://drive.google.com/uc?export=download"
-    file_id = "1x4PO9OH0BHQFDAp-1rvuaEA-ZPI58CmV"
-    
-    try:
-        # First request to get the confirmation token
-        session = requests.Session()
-        response = session.get(f"{base_url}&id={file_id}", stream=True)
-        
-        # Check if we got a confirmation page
-        if "confirm=" in response.url:
-            # Extract the confirmation token
-            confirm_token = None
-            for key, value in response.cookies.items():
-                if key.startswith('download_warning'):
-                    confirm_token = value
-                    break
-                    
-            if confirm_token:
-                # Make a new request with the confirmation token
-                url = f"{base_url}&id={file_id}&confirm={confirm_token}"
-                response = session.get(url, stream=True)
-            else:
-                raise Exception("Could not get download confirmation token")
-        
-        response.raise_for_status()
-        total_size = int(response.headers.get('content-length', 0))
-        downloaded = 0
-        chunk_size = 8192
-
-        print("Downloading database...")
-        with open(zip_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=chunk_size):
-                if chunk:  # filter out keep-alive chunks
-                    downloaded += len(chunk)
-                    f.write(chunk)
-                    # Show download progress
-                    if total_size > 0:
-                        progress = (downloaded / total_size) * 100
-                        print(f"Downloaded: {downloaded/1024/1024:.2f}MB / {total_size/1024/1024:.2f}MB ({progress:.1f}%)", end='\r')
-        
-        # Verify the downloaded file is a valid gzip file
-        print("\nVerifying download...")
-        try:
-            with gzip.open(zip_path, 'rb') as test_f:
-                test_f.read(1)  # Try to read a small amount to verify it's a gzip file
-        except gzip.BadGzipFile:
-            # If it's not a valid gzip file, it might be an HTML error page
-            with open(zip_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-                if "<!DOCTYPE html>" in content or "<html" in content.lower():
-                    raise Exception("Download failed: Received HTML error page instead of database file")
-                else:
-                    raise Exception("Downloaded file is not a valid gzip archive")
-        
-        # Extract the file
-        print("Extracting database...")
-        with gzip.open(zip_path, 'rb') as f_in:
-            with open(self.db_path, 'wb') as f_out:
-                shutil.copyfileobj(f_in, f_out)
-        
-        # Verify the database
-        if os.path.getsize(self.db_path) > 0:
-            print("Database downloaded and extracted successfully.")
-            # Remove the zip file
-            os.remove(zip_path)
-        else:
-            raise Exception("Downloaded database file is empty")
-            
-    except Exception as e:
-        print(f"\nError: {str(e)}")
-        # Clean up any partial downloads
-        if os.path.exists(zip_path):
-            os.remove(zip_path)
-        if os.path.exists(self.db_path):
-            os.remove(self.db_path)
-        raise
         
     def get_exit_data(self, trade_date: str, strikes: List[float], entry_timestamp: datetime) -> pd.DataFrame:
         """
@@ -681,7 +723,7 @@ def main():
     parser.add_argument('--end-date', type=str, help='End date (YYYY-MM-DD)')
     parser.add_argument('--output', type=str, default='backtest_results.csv',
                        help='Output CSV file (default: backtest_results.csv)')
-    parser.add_argument('--entry-time', type=str, default='10:00', nargs='+',
+    parser.add_argument('--entry-time', type=str, nargs='+',
                        help='Entry time(s) in HH:MM format (default: 10:00, can pass multiple)')
     parser.add_argument('--test-multiple-times', action='store_true',
                        help='Test multiple entry times (09:55 to 10:00)')
@@ -690,8 +732,22 @@ def main():
                        help='Days to exclude from trading (default: None)')
     parser.add_argument('--exit-time', type=str, default='13:00',
                        help='Hard exit time in HH:MM format (default: 13:00)')
+    parser.add_argument('--download-db', action='store_true',
+                       help='Download database file from Google Drive if not present')
+    parser.add_argument('--force-download', action='store_true',
+                       help='Force download database even if it already exists')
     
     args = parser.parse_args()
+    
+    # Handle database download if requested
+    if args.download_db or args.force_download:
+        db_path = "option_data.duckdb"
+        logger.info("Database download requested...")
+        if download_database(db_path, force_download=args.force_download):
+            logger.info("Database download completed successfully")
+        else:
+            logger.error("Database download failed")
+            return
     
     # Handle entry times
     if args.test_multiple_times:
