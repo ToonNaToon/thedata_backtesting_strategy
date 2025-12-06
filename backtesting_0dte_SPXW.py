@@ -131,52 +131,89 @@ class IronCondorBacktester:
         """
         return self.conn.execute(query, [trade_date, start_time, end_time]).df()
     def _ensure_database_exists(self):
-        """Ensure the database file exists, download and extract if necessary."""
-        if os.path.exists(self.db_path):
-            print("Database found. Proceeding...")
-            return
+    """Ensure the database file exists, download and extract if necessary."""
+    if os.path.exists(self.db_path):
+        print("Database found. Proceeding...")
+        return
 
-        print("Database not found. Downloading...")
-        zip_path = f"{self.db_path}.gz"
-        url = "https://drive.google.com/uc?export=download&id=1x4PO9OH0BHQFDAp-1rvuaEA-ZPI58CmV"
+    print("Database not found. Downloading...")
+    zip_path = f"{self.db_path}.gz"
+    base_url = "https://drive.google.com/uc?export=download"
+    file_id = "1x4PO9OH0BHQFDAp-1rvuaEA-ZPI58CmV"
     
-        try:
-            # Download the file
-            print(f"Downloading database from {url}...")
-            with requests.get(url, stream=True) as r:
-                r.raise_for_status()
-                total_size = int(r.headers.get('content-length', 0))
-                downloaded = 0
-                chunk_size = 8192
-                r.raise_for_status()
-
-                with open(zip_path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=chunk_size):
-                        downloaded += len(chunk)
-                        f.write(chunk)
-                        # Show download progress
-                        if total_size > 0:
-                            progress = (downloaded / total_size) * 100
-                            print(f"Downloaded: {downloaded/1024/1024:.2f}MB / {total_size/1024/1024:.2f}MB ({progress:.1f}%)", end='\r')
+    try:
+        # First request to get the confirmation token
+        session = requests.Session()
+        response = session.get(f"{base_url}&id={file_id}", stream=True)
+        
+        # Check if we got a confirmation page
+        if "confirm=" in response.url:
+            # Extract the confirmation token
+            confirm_token = None
+            for key, value in response.cookies.items():
+                if key.startswith('download_warning'):
+                    confirm_token = value
+                    break
                     
-            
-            # Extract the file
-            print("Extracting database...")
-            with gzip.open(zip_path, 'rb') as f_in:
-                with open(self.db_path, 'wb') as f_out:
-                    shutil.copyfileobj(f_in, f_out)
-            
-            # Verify the database
-            if os.path.getsize(self.db_path) > 0:
-                print("Database downloaded and extracted successfully.")
-                # Remove the zip file
-                os.remove(zip_path)
+            if confirm_token:
+                # Make a new request with the confirmation token
+                url = f"{base_url}&id={file_id}&confirm={confirm_token}"
+                response = session.get(url, stream=True)
             else:
-                raise Exception("Downloaded database file is empty")
+                raise Exception("Could not get download confirmation token")
+        
+        response.raise_for_status()
+        total_size = int(response.headers.get('content-length', 0))
+        downloaded = 0
+        chunk_size = 8192
+
+        print("Downloading database...")
+        with open(zip_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=chunk_size):
+                if chunk:  # filter out keep-alive chunks
+                    downloaded += len(chunk)
+                    f.write(chunk)
+                    # Show download progress
+                    if total_size > 0:
+                        progress = (downloaded / total_size) * 100
+                        print(f"Downloaded: {downloaded/1024/1024:.2f}MB / {total_size/1024/1024:.2f}MB ({progress:.1f}%)", end='\r')
+        
+        # Verify the downloaded file is a valid gzip file
+        print("\nVerifying download...")
+        try:
+            with gzip.open(zip_path, 'rb') as test_f:
+                test_f.read(1)  # Try to read a small amount to verify it's a gzip file
+        except gzip.BadGzipFile:
+            # If it's not a valid gzip file, it might be an HTML error page
+            with open(zip_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                if "<!DOCTYPE html>" in content or "<html" in content.lower():
+                    raise Exception("Download failed: Received HTML error page instead of database file")
+                else:
+                    raise Exception("Downloaded file is not a valid gzip archive")
+        
+        # Extract the file
+        print("Extracting database...")
+        with gzip.open(zip_path, 'rb') as f_in:
+            with open(self.db_path, 'wb') as f_out:
+                shutil.copyfileobj(f_in, f_out)
+        
+        # Verify the database
+        if os.path.getsize(self.db_path) > 0:
+            print("Database downloaded and extracted successfully.")
+            # Remove the zip file
+            os.remove(zip_path)
+        else:
+            raise Exception("Downloaded database file is empty")
             
-        except Exception as e:
-            print(f"Error setting up database: {e}")
-            raise
+    except Exception as e:
+        print(f"\nError: {str(e)}")
+        # Clean up any partial downloads
+        if os.path.exists(zip_path):
+            os.remove(zip_path)
+        if os.path.exists(self.db_path):
+            os.remove(self.db_path)
+        raise
         
     def get_exit_data(self, trade_date: str, strikes: List[float], entry_timestamp: datetime) -> pd.DataFrame:
         """
