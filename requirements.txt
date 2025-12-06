@@ -1,0 +1,10 @@
+streamlit==1.28.0
+pandas==1.5.0
+numpy==1.23.0
+plotly==5.15.0
+duckdb==0.8.0
+python-dateutil==2.8.2
+pytz==2023.3
+typing-extensions==4.5.0
+altair==4.2.2
+protobuf==3.20.3
