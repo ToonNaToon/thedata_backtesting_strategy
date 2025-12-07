@@ -36,38 +36,41 @@ def download_database(db_path: str = "option_data.duckdb", force_download: bool 
         return True
     
     # Google Drive URL - need to convert to direct download link
-    drive_url = "https://drive.google.com/file/d/1x4PO9OH0BHQFDAp-1rvuaEA-ZPI58CmV/view?usp=drive_link"
     file_id = "1x4PO9OH0BHQFDAp-1rvuaEA-ZPI58CmV"
-    download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
     gz_path = f"{db_path}.gz"
     
     logger.info("Database file not found. Downloading from Google Drive...")
     logger.info("Note: This is a large file (4.9GB) and may take some time to download.")
     
     try:
-        # Download the gzipped file
-        logger.info(f"Downloading to {gz_path}...")
-        
-        # Use requests with streaming for large files
-        session = requests.Session()
-        
-        # First try the direct download
-        response = session.get(download_url, stream=True)
-        response.raise_for_status()
-        
-        # Check if we got the virus warning page by looking at content type and content
-        content_type = response.headers.get('content-type', '')
-        if 'text/html' in content_type or 'Google Drive - Virus scan warning' in response.text:
-            logger.warning("Google Drive virus scan warning detected. Attempting to bypass...")
-            # Parse the confirmation page to get the download link
-            confirm_url = f"https://drive.google.com/uc?export=download&id={file_id}"
-            response = session.get(confirm_url, stream=True)
+        # Use gdown library for more reliable Google Drive downloads
+        try:
+            import gdown
+            logger.info("Using gdown for Google Drive download...")
+            url = f"https://drive.google.com/file/d/{file_id}/view?usp=drive_link"
+            gdown.download(url, gz_path, quiet=False, fuzzy=True)
+        except ImportError:
+            logger.info("gdown not available, falling back to requests...")
+            # Fallback to manual requests approach
+            session = requests.Session()
+            
+            # First try the direct download
+            download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+            response = session.get(download_url, stream=True)
             response.raise_for_status()
             
-            # If still getting HTML, we need to extract the actual download link
-            if 'text/html' in response.headers.get('content-type', ''):
+            # Check if we got the virus warning page
+            content_type = response.headers.get('content-type', '')
+            if 'text/html' in content_type:
+                logger.warning("Google Drive virus scan warning detected. Attempting to bypass...")
+                
+                # For large files, we need to get the confirmation token
+                confirm_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+                response = session.get(confirm_url)
+                response.raise_for_status()
+                
+                # Extract confirmation token
                 import re
-                # Look for the confirmation token in the HTML
                 text_content = response.text
                 confirm_match = re.search(r'confirm=([0-9A-Za-z_-]+)', text_content)
                 if confirm_match:
@@ -77,37 +80,35 @@ def download_database(db_path: str = "option_data.duckdb", force_download: bool 
                     response = session.get(final_url, stream=True)
                     response.raise_for_status()
                 else:
-                    # Try alternative approach - look for download link in the page
-                    download_link_match = re.search(r'href=["\'](/uc\?export=download[^"\']+)["\']', text_content)
-                    if download_link_match:
-                        download_path = download_link_match.group(1)
-                        final_url = f"https://drive.google.com{download_path}"
-                        logger.info("Found alternative download link...")
-                        response = session.get(final_url, stream=True)
-                        response.raise_for_status()
+                    logger.error("Could not extract confirmation token")
+                    return False
+            
+            # Check if we're still getting HTML
+            if 'text/html' in response.headers.get('content-type', ''):
+                logger.error("Still receiving HTML content. Download failed.")
+                return False
+            
+            # Save the file
+            with open(gz_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
         
-        # Final check - make sure we're not getting HTML
-        if 'text/html' in response.headers.get('content-type', ''):
-            logger.error("Still receiving HTML content. Download may have failed.")
-            with open('debug_response.html', 'w') as f:
-                f.write(response.text)
-            logger.error("Response content saved to debug_response.html for inspection")
+        # Verify the downloaded file
+        if not os.path.exists(gz_path):
+            logger.error("Download failed - no file created")
             return False
         
-        # Save the gzipped file
-        total_size = int(response.headers.get('content-length', 0))
-        downloaded = 0
+        file_size = os.path.getsize(gz_path)
+        logger.info(f"Downloaded file size: {file_size/1024/1024:.1f}MB")
         
-        with open(gz_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if total_size > 0:
-                        percent = (downloaded / total_size) * 100
-                        logger.info(f"Downloaded {downloaded/1024/1024:.1f}MB / {total_size/1024/1024:.1f}MB ({percent:.1f}%)")
-        
-        logger.info(f"Download completed: {gz_path}")
+        if file_size < 1000:  # Less than 1MB indicates an error page
+            logger.error("Downloaded file too small - likely an error page")
+            with open(gz_path, 'r', errors='ignore') as f:
+                content = f.read(500)
+                logger.error(f"File content preview: {content}")
+            os.remove(gz_path)
+            return False
         
         # Extract the gzipped file
         logger.info(f"Extracting {gz_path} to {db_path}...")
@@ -121,7 +122,7 @@ def download_database(db_path: str = "option_data.duckdb", force_download: bool 
         
         logger.info(f"Database successfully extracted to: {db_path}")
         
-        # Verify the file exists and has reasonable size
+        # Verify the extracted file
         if os.path.exists(db_path):
             file_size = os.path.getsize(db_path)
             logger.info(f"Database file size: {file_size/1024/1024:.1f}MB")
@@ -130,16 +131,12 @@ def download_database(db_path: str = "option_data.duckdb", force_download: bool 
             logger.error("Database file extraction failed")
             return False
             
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Download failed: {e}")
-        return False
     except Exception as e:
-        logger.error(f"Extraction failed: {e}")
+        logger.error(f"Download/Extraction failed: {e}")
         # Clean up partial files
-        if os.path.exists(gz_path):
-            os.remove(gz_path)
-        if os.path.exists(db_path):
-            os.remove(db_path)
+        for path in [gz_path, db_path]:
+            if os.path.exists(path):
+                os.remove(path)
         return False
 
 class IronCondorBacktester:
