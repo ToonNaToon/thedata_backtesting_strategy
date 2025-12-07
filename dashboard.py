@@ -191,12 +191,17 @@ st.markdown("---")
 # Sidebar for filters
 st.sidebar.header("🔧 Backtesting Parameters")
 
-# Ticker selection
-ticker = st.sidebar.selectbox(
-    "Ticker",
-    options=["SPXW", "SPY", "QQQ", "SPX"],
+# Ticker selection - Only SPXW is now available
+ticker = "SPXW"
+st.sidebar.markdown("**Ticker:** SPXW (0DTE)")
+# Hidden input to maintain compatibility with existing code
+ticker_widget = st.sidebar.empty()
+ticker_widget.selectbox(
+    "Ticker (Fixed to SPXW)",
+    options=["SPXW"],
     index=0,
-    help="Select the underlying ticker to backtest"
+    disabled=True,
+    help="Only SPXW is supported for 0DTE backtesting"
 )
 
 # Wing size selection
