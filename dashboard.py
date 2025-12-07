@@ -24,10 +24,12 @@ from backtesting_0dte_SPXW import IronCondorBacktester, download_database
 def display_single_results(results, ticker, wing, entry_time, exclude_days, exit_time):
     """Display results for single entry time backtest."""
     
+    # Calculate P&L per contract (multiply by 100)
+    results['pnl'] = results['pnl'] * 100
+    results['pnl_pct'] = results['pnl_pct'] * 100  # Convert to percentage
+    
     # Summary statistics
     st.subheader("📊 Summary Statistics")
-    
-    col1, col2, col3, col4 = st.columns(4)
     
     total_trades = len(results)
     profitable_trades = (results['pnl'] > 0).sum()
@@ -37,14 +39,22 @@ def display_single_results(results, ticker, wing, entry_time, exclude_days, exit
     max_pnl = results['pnl'].max()
     min_pnl = results['pnl'].min()
     
+    # Calculate Annual ROI = (total_pnl / wing) / 3 * 100 (as percentage)
+    annual_roi = (total_pnl / wing / 3) if wing > 0 else 0
+    
+    # Display metrics in columns
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
     with col1:
         st.metric("Total Trades", total_trades)
     with col2:
         st.metric("Win Rate", f"{win_rate:.1f}%")
     with col3:
-        st.metric("Avg P&L", f"${avg_pnl:.2f}")
+        st.metric("Avg P&L", f"${avg_pnl:,.2f}")
     with col4:
-        st.metric("Total P&L", f"${total_pnl:.2f}")
+        st.metric("Total P&L", f"${total_pnl:,.2f}")
+    with col5:
+        st.metric("Annual ROI", f"{annual_roi:,.2f}%")
     
     # Parameters summary
     st.subheader("⚙️ Parameters Used")
@@ -52,6 +62,7 @@ def display_single_results(results, ticker, wing, entry_time, exclude_days, exit
     **Ticker:** {ticker} | **Wing:** {wing} | **Entry Time:** {entry_time} | **Exit Time:** {exit_time}
     **Exclude Days:** {', '.join(exclude_days) if exclude_days else 'None'}
     **Date Range:** {results['trade_date'].min()} to {results['trade_date'].max()}
+    **Total P&L:** ${total_pnl:,.2f} | **Annual ROI:** {annual_roi:,.2f}%
     """
     st.markdown(params_text)
     
@@ -81,7 +92,7 @@ def display_single_results(results, ticker, wing, entry_time, exclude_days, exit
     # Format the data for display
     display_results = results.copy()
     display_results['pnl'] = display_results['pnl'].round(2)
-    display_results['pnl_pct'] = (display_results['pnl_pct'] * 100).round(2)
+    display_results['pnl_pct'] = display_results['pnl_pct'].round(2)
     display_results['entry_credit'] = display_results['entry_credit'].round(2)
     
     st.dataframe(
@@ -102,10 +113,25 @@ def display_single_results(results, ticker, wing, entry_time, exclude_days, exit
 def display_multiple_results(results, ticker, wing, entry_times, exclude_days, exit_time):
     """Display results for multiple entry times backtest."""
     
+    # Calculate P&L per contract (multiply by 100) and convert to percentage
+    results['total_pnl'] = results['total_pnl'] * 100
+    results['avg_pnl'] = results['avg_pnl'] * 100
+    results['win_rate'] = results['win_rate'] * 100  # Already a percentage, just to be safe
+    
     st.subheader("📊 Entry Time Comparison")
     
+    # Add Annual ROI column
+    results['annual_roi'] = (results['total_pnl'] / wing / 3).round(2)
+    
+    # Format the display
+    display_df = results.copy()
+    display_df['total_pnl'] = display_df['total_pnl'].apply(lambda x: f"${x:,.2f}")
+    display_df['avg_pnl'] = display_df['avg_pnl'].apply(lambda x: f"${x:,.2f}")
+    display_df['win_rate'] = display_df['win_rate'].apply(lambda x: f"{x:.1f}%")
+    display_df['annual_roi'] = display_df['annual_roi'].apply(lambda x: f"{x:.2f}%")
+    
     # Display comparison table
-    st.dataframe(results, width='stretch')
+    st.dataframe(display_df, width='stretch')
     
     # Create bar chart comparing total P&L by entry time
     st.subheader("📈 Total P&L by Entry Time")
@@ -121,19 +147,19 @@ def display_multiple_results(results, ticker, wing, entry_times, exclude_days, e
     fig.update_layout(height=400)
     st.plotly_chart(fig, width='stretch')
     
-    # Win rate comparison
-    st.subheader("🎯 Win Rate by Entry Time")
+    # Annual ROI comparison
+    st.subheader("📊 Annual ROI by Entry Time")
     
-    fig2 = px.bar(
+    fig3 = px.bar(
         x=results.index,
-        y=results['win_rate'],
-        title=f'Win Rate by Entry Time - {ticker}',
-        color=results['win_rate'],
+        y=results['annual_roi'],
+        title=f'Annual ROI by Entry Time - {ticker}',
+        color=results['annual_roi'],
         color_continuous_scale='viridis',
-        labels={'x': 'Entry Time', 'y': 'Win Rate (%)'}
+        labels={'x': 'Entry Time', 'y': 'Annual ROI (%)'}
     )
-    fig2.update_layout(height=400)
-    st.plotly_chart(fig2, width='stretch')
+    fig3.update_layout(height=400)
+    st.plotly_chart(fig3, width='stretch')
     
     # Parameters summary
     st.subheader("⚙️ Parameters Used")
@@ -223,6 +249,7 @@ exit_time_str = st.sidebar.selectbox(
     help="Select hard exit time (9:30-16:00 EST)"
 )
 exit_time = pd.to_datetime(exit_time_str).time()
+
 # Date range selection
 st.sidebar.subheader("📅 Date Range")
 start_date = st.sidebar.date_input(
