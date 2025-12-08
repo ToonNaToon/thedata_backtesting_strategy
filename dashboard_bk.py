@@ -24,12 +24,10 @@ from backtesting_0dte_SPXW import IronCondorBacktester, download_database
 def display_single_results(results, ticker, wing, entry_time, exclude_days, exit_time):
     """Display results for single entry time backtest."""
     
-    # Convert P&L percentage to percentage (0-100)
-    results['pnl_pct'] = results['pnl_pct'] * 100  # Convert to percentage (0-100)
-    # P&L is already in dollars, no need to multiply by 100
-    
     # Summary statistics
     st.subheader("📊 Summary Statistics")
+    
+    col1, col2, col3, col4 = st.columns(4)
     
     total_trades = len(results)
     profitable_trades = (results['pnl'] > 0).sum()
@@ -39,22 +37,14 @@ def display_single_results(results, ticker, wing, entry_time, exclude_days, exit
     max_pnl = results['pnl'].max()
     min_pnl = results['pnl'].min()
     
-    # Calculate Annual ROI = (total_pnl / wing) / 3 * 100 (as percentage)
-    annual_roi = (total_pnl / wing / 3) * 100 if wing > 0 else 0
-    
-    # Display metrics in columns
-    col1, col2, col3, col4, col5 = st.columns(5)
-    
     with col1:
         st.metric("Total Trades", total_trades)
     with col2:
         st.metric("Win Rate", f"{win_rate:.1f}%")
     with col3:
-        st.metric("Avg P&L", f"${avg_pnl:,.2f}")
+        st.metric("Avg P&L", f"${avg_pnl:.2f}")
     with col4:
-        st.metric("Total P&L", f"${total_pnl:,.2f}")
-    with col5:
-        st.metric("Annual ROI", f"{annual_roi:,.2f}%")
+        st.metric("Total P&L", f"${total_pnl:.2f}")
     
     # Parameters summary
     st.subheader("⚙️ Parameters Used")
@@ -62,7 +52,6 @@ def display_single_results(results, ticker, wing, entry_time, exclude_days, exit
     **Ticker:** {ticker} | **Wing:** {wing} | **Entry Time:** {entry_time} | **Exit Time:** {exit_time}
     **Exclude Days:** {', '.join(exclude_days) if exclude_days else 'None'}
     **Date Range:** {results['trade_date'].min()} to {results['trade_date'].max()}
-    **Total P&L:** ${total_pnl:,.2f} | **Annual ROI:** {annual_roi:,.2f}%
     """
     st.markdown(params_text)
     
@@ -92,7 +81,7 @@ def display_single_results(results, ticker, wing, entry_time, exclude_days, exit
     # Format the data for display
     display_results = results.copy()
     display_results['pnl'] = display_results['pnl'].round(2)
-    display_results['pnl_pct'] = display_results['pnl_pct'].round(2)
+    display_results['pnl_pct'] = (display_results['pnl_pct'] * 100).round(2)
     display_results['entry_credit'] = display_results['entry_credit'].round(2)
     
     st.dataframe(
@@ -113,24 +102,10 @@ def display_single_results(results, ticker, wing, entry_time, exclude_days, exit
 def display_multiple_results(results, ticker, wing, entry_times, exclude_days, exit_time):
     """Display results for multiple entry times backtest."""
     
-    # Convert P&L percentage to percentage (0-100)
-    results['win_rate'] = results['win_rate'] * 100  # Convert to percentage (0-100)
-    # P&L is already in dollars, no need to multiply by 100
-    
     st.subheader("📊 Entry Time Comparison")
     
-    # Add Annual ROI column
-    results['annual_roi'] = (results['total_pnl'] / wing / 3 * 100).round(2)
-    
-    # Format the display
-    display_df = results.copy()
-    display_df['total_pnl'] = display_df['total_pnl'].apply(lambda x: f"${x:,.2f}")
-    display_df['avg_pnl'] = display_df['avg_pnl'].apply(lambda x: f"${x:,.2f}")
-    display_df['win_rate'] = display_df['win_rate'].apply(lambda x: f"{x:.1f}%")
-    display_df['annual_roi'] = display_df['annual_roi'].apply(lambda x: f"{x:.2f}%")
-    
     # Display comparison table
-    st.dataframe(display_df, width='stretch')
+    st.dataframe(results, width='stretch')
     
     # Create bar chart comparing total P&L by entry time
     st.subheader("📈 Total P&L by Entry Time")
@@ -146,19 +121,19 @@ def display_multiple_results(results, ticker, wing, entry_times, exclude_days, e
     fig.update_layout(height=400)
     st.plotly_chart(fig, width='stretch')
     
-    # Annual ROI comparison
-    st.subheader("📊 Annual ROI by Entry Time")
+    # Win rate comparison
+    st.subheader("🎯 Win Rate by Entry Time")
     
-    fig3 = px.bar(
+    fig2 = px.bar(
         x=results.index,
-        y=results['annual_roi'],
-        title=f'Annual ROI by Entry Time - {ticker}',
-        color=results['annual_roi'],
+        y=results['win_rate'],
+        title=f'Win Rate by Entry Time - {ticker}',
+        color=results['win_rate'],
         color_continuous_scale='viridis',
-        labels={'x': 'Entry Time', 'y': 'Annual ROI (%)'}
+        labels={'x': 'Entry Time', 'y': 'Win Rate (%)'}
     )
-    fig3.update_layout(height=400)
-    st.plotly_chart(fig3, width='stretch')
+    fig2.update_layout(height=400)
+    st.plotly_chart(fig2, width='stretch')
     
     # Parameters summary
     st.subheader("⚙️ Parameters Used")
@@ -190,17 +165,12 @@ st.markdown("---")
 # Sidebar for filters
 st.sidebar.header("🔧 Backtesting Parameters")
 
-# Ticker selection - Only SPXW is now available
-ticker = "SPXW"
-st.sidebar.markdown("**Ticker:** SPXW (0DTE)")
-# Hidden input to maintain compatibility with existing code
-ticker_widget = st.sidebar.empty()
-ticker_widget.selectbox(
-    "Ticker (Fixed to SPXW)",
-    options=["SPXW"],
+# Ticker selection
+ticker = st.sidebar.selectbox(
+    "Ticker",
+    options=["SPXW", "SPY", "QQQ", "SPX"],
     index=0,
-    disabled=True,
-    help="Only SPXW is supported for 0DTE backtesting"
+    help="Select the underlying ticker to backtest"
 )
 
 # Wing size selection
@@ -253,15 +223,6 @@ exit_time_str = st.sidebar.selectbox(
     help="Select hard exit time (9:30-16:00 EST)"
 )
 exit_time = pd.to_datetime(exit_time_str).time()
-
-# Profit target selection
-profit_target = st.sidebar.select_slider(
-    "Profit Target (%)",
-    options=[i/100 for i in range(5, 101, 5)],  # 5% to 100% in 5% increments
-    value=0.10,  # Default to 10%
-    help="Target profit percentage to close the trade early"
-)
-
 # Date range selection
 st.sidebar.subheader("📅 Date Range")
 start_date = st.sidebar.date_input(
@@ -311,8 +272,7 @@ if run_button:
             ticker=ticker,
             wing=wing,
             exclude_days=exclude_days,
-            exit_time=exit_time_str,
-            profit_target=profit_target
+            exit_time=exit_time_str
         )
         
         # Run backtest
@@ -347,11 +307,9 @@ if run_button:
             if len(entry_times) == 1:
                 # Single entry time results
                 display_single_results(results, ticker, wing, entry_times[0], exclude_days, exit_time.strftime("%H:%M"))
-                st.sidebar.metric("Profit Target Used", f"{profit_target*100:.0f}%")
             else:
                 # Multiple entry times results
                 display_multiple_results(results, ticker, wing, entry_times, exclude_days, exit_time.strftime("%H:%M"))
-                st.sidebar.metric("Profit Target Used", f"{profit_target*100:.0f}%")
                 
     except Exception as e:
         st.error(f"Error running backtest: {str(e)}")

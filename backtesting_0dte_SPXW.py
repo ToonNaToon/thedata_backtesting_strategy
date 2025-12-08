@@ -142,7 +142,8 @@ def download_database(db_path: str = "option_data.duckdb", force_download: bool 
 
 class IronCondorBacktester:
     def __init__(self, db_path: str = "option_data.duckdb", ticker: str = "SPXW", wing: int = 20, 
-                 exclude_days: List[str] = None, exit_time: str = "13:00"):
+                 exclude_days: List[str] = None, exit_time: str = "13:00", 
+                 profit_target: float = 0.10, fees: float = 0.038):
         """
         Initialize the backtester.
         
@@ -152,13 +153,16 @@ class IronCondorBacktester:
             wing: Wing width for iron condor (1,2,3,4,5,10,15,20)
             exclude_days: List of days to exclude (Monday, Tuesday, Wednesday, Thursday, Friday)
             exit_time: Hard exit time (default: 13:00)
+            profit_target: Profit target as decimal (e.g., 0.10 for 10%)
+            fees: Fixed fees per trade in dollars (default: 0.038)
         """
         self.db_path = db_path
         self.ticker = ticker
         self.wing = wing
         self.exclude_days = exclude_days or []
         self.exit_time = exit_time
-        self.profit_target = 0.10  # 10% profit target
+        self.profit_target = profit_target
+        self.fees = fees
         self.conn = None
 
     def connect(self):
@@ -444,12 +448,12 @@ class IronCondorBacktester:
             if exit_cost is None:
                 continue
                 
-            # Calculate P&L
-            pnl = entry_credit - exit_cost
+            # Calculate P&L (after fees)
+            pnl = entry_credit - exit_cost - self.fees
             pnl_pct = pnl / entry_credit if entry_credit > 0 else 0
             
-            # Check profit target
-            if pnl_pct >= self.profit_target:
+            # Check profit target (after fees)
+            if pnl_pct >= self.profit_target and pnl > 0:
                 return {
                     'exit_reason': 'TP',
                     'exit_timestamp': timestamp,
@@ -486,7 +490,7 @@ class IronCondorBacktester:
                 break
         
         if final_cost is not None:
-            pnl = entry_credit - final_cost
+            pnl = entry_credit - final_cost - self.fees
             pnl_pct = pnl / entry_credit if entry_credit > 0 else 0
         else:
             pnl = None
