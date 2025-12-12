@@ -19,6 +19,16 @@ for hour in range(9, 17):  # 9 to 16
 # Add the current directory to the path to import the backtester
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+# Hardcoded dates with 10+ point open price mismatches
+# These dates have significant discrepancies (>10 points) between database 9:31 AM open prices
+# and Yahoo Finance official open prices, indicating potential data quality issues.
+# Excluding these dates can improve backtesting accuracy by avoiding unreliable open price data.
+# Total: 145 dates spanning from 2021-01-11 to 2025-11-21
+HIGH_MISMATCH_DATES = [
+    "2021-01-11", "2021-01-19", "2021-01-27", "2021-01-29", 
+    "2021-02-01", "2021-02-05", "2021-02-08", "2021-02-10", "2021-03-01", "2021-03-05", "2021-04-05", "2021-04-16", "2021-04-30", "2021-05-03", "2021-05-14", "2021-05-19", "2021-06-01", "2021-06-18", "2021-06-21", "2021-07-09", "2021-07-19", "2021-08-23", "2021-09-10", "2021-09-13", "2021-09-20", "2021-10-01", "2021-10-06", "2021-10-15", "2021-10-18", "2021-11-26", "2021-11-29", "2021-11-30", "2021-12-01", "2021-12-06", "2021-12-10", "2021-12-17", "2021-12-20", "2022-01-10", "2022-01-18", "2022-01-26", "2022-02-09", "2022-02-23", "2022-02-28", "2022-03-09", "2022-03-14", "2022-04-25", "2022-05-09", "2022-05-23", "2022-06-01", "2022-06-03", "2022-06-06", "2022-06-10", "2022-06-16", "2022-06-22", "2022-07-05", "2022-07-07", "2022-07-11", "2022-07-15", "2022-07-18", "2022-07-28", "2022-08-10", "2022-08-11", "2022-08-22", "2022-09-06", "2022-09-08", "2022-09-13", "2022-09-16", "2022-09-23", "2022-10-03", "2022-10-04", "2022-10-13", "2022-10-17", "2022-10-18", "2022-10-27", "2022-11-03", "2022-11-04", "2022-11-10", "2022-11-15", "2022-11-18", "2022-12-13", "2022-12-16", "2023-01-06", "2023-01-25", "2023-02-14", "2023-02-16", "2023-02-21", "2023-02-24", "2023-02-27", "2023-03-13", "2023-03-14", "2023-03-15", "2023-03-21", "2023-03-23", "2023-03-27", "2023-03-29", "2023-05-05", "2023-05-25", "2023-06-02", "2023-07-06", "2023-08-07", "2023-11-14", "2023-12-21", "2024-02-13", "2024-04-15", "2024-04-25", "2024-05-29", "2024-06-14", "2024-08-05", "2024-08-15", "2024-09-03", "2024-09-11", "2024-10-25", "2024-11-06", "2025-01-02", "2025-01-10", "2025-01-15", "2025-01-21", "2025-01-27", "2025-02-03", "2025-02-12", "2025-03-06", "2025-03-10", "2025-03-20", "2025-04-04", "2025-04-07", "2025-04-08", "2025-04-14", "2025-04-23", "2025-04-30", "2025-05-02", "2025-05-12", "2025-05-27", "2025-05-30", "2025-06-16", "2025-07-31", "2025-08-01", "2025-08-21", "2025-09-02", "2025-09-10", "2025-09-25", "2025-10-14", "2025-10-20", "2025-11-07", "2025-11-10", "2025-11-21"
+]
+
 from backtesting_0dte_SPXW import IronCondorBacktester, download_database
 
 def display_single_results(results, ticker, wing, entry_time, exclude_days, exit_time):
@@ -113,21 +123,23 @@ def display_single_results(results, ticker, wing, entry_time, exclude_days, exit
 def display_multiple_results(results, ticker, wing, entry_times, exclude_days, exit_time):
     """Display results for multiple entry times backtest."""
     
-    # Convert P&L percentage to percentage (0-100)
-    results['win_rate'] = results['win_rate'] * 100  # Convert to percentage (0-100)
-    # P&L is already in dollars, no need to multiply by 100
+    # Win rate is already in percentage format from backtesting code
     
     st.subheader("📊 Entry Time Comparison")
     
     # Add Annual ROI column
     results['annual_roi'] = (results['total_pnl'] / wing / 3 * 100).round(2)
     
+    # Ensure data types are correct before formatting
+    results['win_rate'] = pd.to_numeric(results['win_rate'], errors='coerce')
+    results['annual_roi'] = pd.to_numeric(results['annual_roi'], errors='coerce')
+    
     # Format the display
     display_df = results.copy()
     display_df['total_pnl'] = display_df['total_pnl'].apply(lambda x: f"${x:,.2f}")
     display_df['avg_pnl'] = display_df['avg_pnl'].apply(lambda x: f"${x:,.2f}")
-    display_df['win_rate'] = display_df['win_rate'].apply(lambda x: f"{x:.1f}%")
-    display_df['annual_roi'] = display_df['annual_roi'].apply(lambda x: f"{x:.2f}%")
+    display_df['win_rate'] = display_df['win_rate'].apply(lambda x: f"{float(x):.1f}%")
+    display_df['annual_roi'] = display_df['annual_roi'].apply(lambda x: f"{float(x):.2f}%")
     
     # Display comparison table
     st.dataframe(display_df, width='stretch')
@@ -237,6 +249,25 @@ elif entry_time_option == "Multiple Times":
 else:  # Preset Range
     entry_times = ["09:55", "09:56", "09:57", "09:58", "09:59", "10:00"]
 
+# Exclude high mismatch dates filter
+exclude_high_mismatches = st.sidebar.selectbox(
+    "Exclude 10+ Point Mismatches",
+    options=["No", "Yes"],
+    index=0,
+    help="Exclude trading days with 10+ point open price mismatches. These dates have unreliable open price data compared to Yahoo Finance official prices."
+)
+
+# Fees input
+fees_per_share = st.sidebar.number_input(
+    "Fees (per share)",
+    min_value=0.0,
+    max_value=1.0,
+    value=0.038,
+    step=0.001,
+    format="%.3f",
+    help="Trading fees per share in dollars. Default is $0.038 per share."
+)
+
 # Exclude days selection
 exclude_days = st.sidebar.multiselect(
     "Exclude Days",
@@ -312,27 +343,60 @@ if run_button:
             wing=wing,
             exclude_days=exclude_days,
             exit_time=exit_time_str,
-            profit_target=profit_target
+            profit_target=profit_target,
+            fees=fees_per_share
         )
         
         # Run backtest
         status_text.text("Running backtest...")
         progress_bar.progress(30)
         
-        if len(entry_times) == 1:
-            # Single entry time
-            results = backtester.run_backtest(
-                start_date=start_date.strftime("%Y-%m-%d"),
-                end_date=end_date.strftime("%Y-%m-%d"),
-                entry_time=entry_times[0]
-            )
+        # Filter out high mismatch dates if selected
+        if exclude_high_mismatches == "Yes":
+            # Apply filtering for high mismatch dates to improve data quality
+            # These dates have >10 point discrepancies in open prices vs Yahoo Finance
+            if len(entry_times) == 1:
+                # Single entry time
+                results = backtester.run_backtest(
+                    start_date=start_date.strftime("%Y-%m-%d"),
+                    end_date=end_date.strftime("%Y-%m-%d"),
+                    entry_time=entry_times[0]
+                )
+                # Filter out high mismatch dates to remove unreliable open price data
+                # Convert trade_date to string for comparison with HIGH_MISMATCH_DATES
+                results = results[~results['trade_date'].astype(str).isin(HIGH_MISMATCH_DATES)]
+            else:
+                # Multiple entry times
+                results = backtester.test_multiple_entry_times(
+                    start_date=start_date.strftime("%Y-%m-%d"),
+                    end_date=end_date.strftime("%Y-%m-%d"),
+                    entry_times=entry_times
+                )
+                # Filter out high mismatch dates for each entry time
+                for entry_time in entry_times:
+                    if entry_time in results.index:
+                        entry_results = results.loc[entry_time]
+                        if hasattr(entry_results, 'trade_date'):
+                            # Convert trade_date to string for comparison with HIGH_MISMATCH_DATES
+                            filtered_results = entry_results[~entry_results['trade_date'].astype(str).isin(HIGH_MISMATCH_DATES)]
+                            results.loc[entry_time] = filtered_results
         else:
-            # Multiple entry times
-            results = backtester.test_multiple_entry_times(
-                start_date=start_date.strftime("%Y-%m-%d"),
-                end_date=end_date.strftime("%Y-%m-%d"),
-                entry_times=entry_times
-            )
+            # Run normal backtest without filtering (include all dates)
+            if len(entry_times) == 1:
+                # Single entry time
+                results = backtester.run_backtest(
+                    start_date=start_date.strftime("%Y-%m-%d"),
+                    end_date=end_date.strftime("%Y-%m-%d"),
+                    entry_time=entry_times[0]
+                )
+            else:
+                # Multiple entry times
+                results = backtester.test_multiple_entry_times(
+                    start_date=start_date.strftime("%Y-%m-%d"),
+                    end_date=end_date.strftime("%Y-%m-%d"),
+                    entry_times=entry_times,
+                    fees=fees_per_share
+                )
         
         progress_bar.progress(80)
         status_text.text("Processing results...")

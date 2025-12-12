@@ -204,6 +204,18 @@ class IronCondorBacktester:
             if day in day_map:
                 exclude_conditions.append(f"strftime('%w', trade_date) != '{day_map[day]}'")
         
+        # Exclude problematic dates with data issues
+        # 2025-04-09: Extreme market movement caused negative exit cost (-$23.78) leading to 778% P&L
+        # 2023-09-22: Missing exit strikes - incomplete data for profit target monitoring
+        # 2023-10-11: Missing exit strikes - incomplete data for profit target monitoring
+        # These dates represent outliers that could skew backtesting results
+        problematic_dates = ['2025-04-09', '2023-09-22', '2023-10-11']
+        
+        if problematic_dates:
+            date_exclude_clause = " AND trade_date NOT IN ('" + "', '".join(problematic_dates) + "')"
+        else:
+            date_exclude_clause = ""
+        
         exclude_clause = " AND " + " AND ".join(exclude_conditions) if exclude_conditions else ""
         
         query = f"""
@@ -211,6 +223,7 @@ class IronCondorBacktester:
         FROM optionData_Backtesting 
         WHERE ticker = '{self.ticker}' 
         {exclude_clause}
+        {date_exclude_clause}
         ORDER BY trade_date
         """
         result = self.conn.execute(query).fetchall()
@@ -642,7 +655,8 @@ class IronCondorBacktester:
             self.close()
 
     def test_multiple_entry_times(self, start_date: str = None, end_date: str = None, 
-                                   entry_times: List[str] = ['09:55', '09:56', '09:57', '09:58', '09:59', '10:00']) -> pd.DataFrame:
+                                   entry_times: List[str] = ['09:55', '09:56', '09:57', '09:58', '09:59', '10:00'], 
+                                   fees: float = 0.038) -> pd.DataFrame:
         """
         Test multiple entry times and compare results.
         
@@ -650,6 +664,7 @@ class IronCondorBacktester:
             start_date: Optional start date (YYYY-MM-DD)
             end_date: Optional end date (YYYY-MM-DD)
             entry_times: List of entry times to test
+            fees: Trading fees per share in dollars
             
         Returns:
             DataFrame with comparison results for all entry times
