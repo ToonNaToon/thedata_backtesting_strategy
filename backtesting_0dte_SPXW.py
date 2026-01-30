@@ -36,7 +36,7 @@ def download_database(db_path: str = "option_data.duckdb", force_download: bool 
         return True
 
     # Google Drive URL - need to convert to direct download link
-    file_id = "1dzxDIuARPqMZAGbnA7MmySrOr7aW7fwC"
+    file_id = "17PUC_9LSEJ_jHYx4cgxJl2c9flysKCQY"
     # "1x4PO9OH0BHQFDAp-1rvuaEA-ZPI58CmV"
     gz_path = f"{db_path}.gz"
     
